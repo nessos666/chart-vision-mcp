@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+vision_screenshots/
+reports/
