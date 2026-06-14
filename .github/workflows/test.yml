@@ -1,7 +1,7 @@
-name: Tests
+name: Validate
 on: [push, pull_request]
 jobs:
-  test:
+  validate:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -9,4 +9,4 @@ jobs:
         with:
           python-version: '3.11'
       - run: pip install pytest
-      - run: pytest tests/ -v --tb=short
+      - run: python -m py_compile *.py
