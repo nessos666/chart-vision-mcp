@@ -32,6 +32,8 @@ from collections import Counter
 
 import numpy as np
 
+from _logging import logger
+
 # ---------------------------------------------------------------------------
 # Screenshot
 # ---------------------------------------------------------------------------
@@ -44,7 +46,7 @@ def take_screenshot():
         img = ImageGrab.grab()
         return np.array(img.convert("RGB"))
     except Exception as e:
-        print(f"Pillow Fehler: {e}")
+        logger.warning("Pillow fehlgeschlagen: %s", e)
     
     # Fallback: ffmpeg
     try:
@@ -61,7 +63,7 @@ def take_screenshot():
         os.unlink(tmp.name)
         return img
     except Exception as e:
-        print(f"ffmpeg Fehler: {e}")
+        logger.warning("ffmpeg fehlgeschlagen: %s", e)
     
     return None
 
@@ -141,6 +143,7 @@ COLORS = {
 
 def detect_colors(img):
     """Erkenne welche Farben im Chart vorkommen und wo."""
+    import cv2
     results = {}
     h, w = img.shape[:2]
     
@@ -154,13 +157,8 @@ def detect_colors(img):
         percentage = (pixel_count / (h * w)) * 100
         
         if percentage > 0.5:  # Mindestens 0.5% der Bildfläche
-            # Cluster finden (zusammenhängende Bereiche)
             contours, _ = cv2.findContours(mask_total, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-            
-            # Größe des größten Clusters
-            max_area = 0
-            if contours:
-                max_area = max(cv2.contourArea(c) for c in contours)
+            max_area = max((cv2.contourArea(c) for c in contours), default=0)
             
             results[color_name] = {
                 "pct": round(percentage, 1),
@@ -173,6 +171,7 @@ def detect_colors(img):
 
 def detect_horizontal_lines(img):
     """Erkenne horizontale Linien (Levels)."""
+    import cv2
     gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
     edges = cv2.Canny(gray, 50, 150, apertureSize=3)
     
@@ -182,14 +181,12 @@ def detect_horizontal_lines(img):
     if lines is None:
         return {"count": 0, "y_positions": []}
     
-    # Gruppiere nahe Linien (gleiches Level)
     y_positions = []
     for line in lines:
         x1, y1, x2, y2 = line[0]
-        if abs(y2 - y1) < 5:  # Horizontal
+        if abs(y2 - y1) < 5:
             y_positions.append((y1 + y2) // 2)
     
-    # Cluster ähnlicher Y-Positionen
     if not y_positions:
         return {"count": 0, "y_positions": []}
     
@@ -208,23 +205,21 @@ def detect_horizontal_lines(img):
     
     return {
         "count": len(y_clusters),
-        "y_positions": y_clusters[:50]  # Max 50 Levels
+        "y_positions": y_clusters[:50]
     }
 
 def detect_price_bars(img):
     """Erkenne grüne/rote Candlestick-Balken im Chart-Bereich."""
+    import cv2
     h, w = img.shape[:2]
     
-    # Chart-Bereich = mittlere 70% der Höhe, volle Breite
     chart_top = int(h * 0.1)
     chart_bot = int(h * 0.85)
     chart = img[chart_top:chart_bot, :]
     
-    # Grüne Pixel (bullish)
     green_mask = cv2.inRange(chart, np.array([0, 100, 0]), np.array([80, 255, 80]))
     green_pct = np.sum(green_mask > 0) / green_mask.size * 100
     
-    # Rote Pixel (bearish)
     red_mask = cv2.inRange(chart, np.array([100, 0, 0]), np.array([255, 80, 80]))
     red_pct = np.sum(red_mask > 0) / red_mask.size * 100
     
@@ -244,12 +239,10 @@ def detect_price_bars(img):
 
 def detect_volume_bars(img):
     """Erkenne Volumen-Balken (unten im Chart)."""
+    import cv2
     h, w = img.shape[:2]
-    
-    # Volumen-Bereich = untere 15%
     vol_area = img[int(h * 0.85):, :]
     
-    # Volumen ist oft grün/rot gefärbt
     green_vol = cv2.inRange(vol_area, np.array([0, 80, 0]), np.array([60, 255, 60]))
     red_vol = cv2.inRange(vol_area, np.array([80, 0, 0]), np.array([255, 60, 60]))
     
@@ -267,32 +260,26 @@ def detect_volume_bars(img):
 
 def detect_text_regions(img):
     """Erkenne Bereiche mit Text/Labels (hell auf dunklem Hintergrund)."""
+    import cv2
     gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
-    
-    # Helle Pixel (Text auf dunklem TradingView-Hintergrund)
     _, bright = cv2.threshold(gray, 200, 255, cv2.THRESH_BINARY)
-    
-    # Finde zusammenhängende Textblöcke
     contours, _ = cv2.findContours(bright, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     
     text_regions = []
     for c in contours:
         area = cv2.contourArea(c)
-        if 10 < area < 5000:  # Typische Textgröße
+        if 10 < area < 5000:
             x, y, w, h = cv2.boundingRect(c)
             text_regions.append({"x": x, "y": y, "w": w, "h": h})
     
     return {
         "text_regions_found": len(text_regions),
-        "approximate_labels": min(len(text_regions), 30)  # Max 30 Labels
+        "approximate_labels": min(len(text_regions), 30)
     }
 
 def detect_rectangles(img):
     """Erkenne farbige Rechtecke/Zonen (FVG, Orderblock, EHPDA-Bereiche)."""
-    h, w = img.shape[:2]
-    
-    # Suche nach semi-transparenten farbigen Blöcken
-    # Typisch für EHPDA/FVG: Pink, Blau, Gelb, Türkis
+    import cv2
     zone_colors = {
         "pink/fvg_zone": cv2.inRange(img, np.array([120, 0, 120]), np.array([255, 100, 255])),
         "blue/inefficiency": cv2.inRange(img, np.array([0, 80, 150]), np.array([80, 200, 255])),
@@ -324,7 +311,7 @@ def classify_trend(candle_data):
 SAVE_DIR = os.path.expanduser("~/hermes-test/vision_screenshots")
 
 def main():
-    import cv2  # Import hier, damit ImportError sauber abgefangen wird
+    import cv2
     
     debug = "--debug" in sys.argv
     
@@ -332,29 +319,27 @@ def main():
     if "--file" in sys.argv:
         idx = sys.argv.index("--file")
         path = sys.argv[idx + 1]
-        import cv2
         img = cv2.imread(path)
         if img is None:
-            print(f"❌ Kann Bild nicht laden: {path}")
+            logger.error("Kann Bild nicht laden: %s", path)
             sys.exit(1)
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        print(f"📂 Bild geladen: {path}")
+        logger.info("Bild geladen: %s", path)
     else:
-        print("📸 Nehme Screenshot auf...")
+        logger.info("Nehme Screenshot auf...")
         img = take_screenshot()
         if img is None:
-            print("❌ Kein Screenshot möglich")
+            logger.error("Kein Screenshot möglich")
             sys.exit(1)
         
-        # Speichern
         os.makedirs(SAVE_DIR, exist_ok=True)
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         save_path = os.path.join(SAVE_DIR, f"chart_{ts}.png")
         cv2.imwrite(save_path, cv2.cvtColor(img, cv2.COLOR_RGB2BGR))
-        print(f"📸 Gespeichert: {save_path}")
+        logger.info("Screenshot gespeichert: %s", save_path)
     
     h, w = img.shape[:2]
-    print(f"📐 Bildgröße: {w}x{h}px")
+    logger.info("Bildgröße: %dx%dpx", w, h)
     
     print("\n" + "=" * 60)
     print("📊 CHART VISION ANALYSE (OpenCV Lokal)")
@@ -409,7 +394,6 @@ def main():
     print("📋 ZUSAMMENFASSUNG")
     print("=" * 60)
     
-    # Volumen-bestätigter Trend
     if candle_data["bias"] == "bullish" and vol["volume_bias"] == "bullish":
         print("✅ BULLISH: Grüne Kerzen + bullishes Volumen → Aufwärtsdruck bestätigt")
     elif candle_data["bias"] == "bearish" and vol["volume_bias"] == "bearish":
@@ -421,7 +405,6 @@ def main():
     else:
         print("⚖️ NEUTRAL: Kein klares Signal")
     
-    # Wichtige Farben
     key_colors = []
     for c in ["rot (bearish)", "grün (bullish)", "gelb (neutral)", "pink/magenta", "orange"]:
         if c in colors and colors[c]["pct"] > 2:
@@ -429,7 +412,6 @@ def main():
     if key_colors:
         print(f"🎨 Dominante Chart-Farben: {', '.join(key_colors)}")
     
-    # Levels
     if lines["count"] > 20:
         print(f"📏 Viele Levels ({lines['count']}) → Dichte Preis-Zonen")
     elif lines["count"] > 10:
@@ -452,7 +434,6 @@ if __name__ == "__main__":
     try:
         import cv2
     except ImportError:
-        print("❌ opencv-python nicht installiert.")
-        print("   pip install opencv-python pillow numpy")
+        logger.error("opencv-python nicht installiert. pip install opencv-python pillow numpy")
         sys.exit(1)
     main()
