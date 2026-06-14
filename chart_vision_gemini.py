@@ -29,6 +29,8 @@ import subprocess
 import tempfile
 from datetime import datetime
 
+from _logging import logger
+
 # ---------------------------------------------------------------------------
 # Konfiguration
 # ---------------------------------------------------------------------------
@@ -67,7 +69,7 @@ def take_screenshot():
         img.save(buf, format="PNG")
         return buf.getvalue()
     except Exception as e:
-        print(f"Pillow Fehler: {e}")
+        logger.warning("Pillow fehlgeschlagen: %s", e)
     
     # Fallback ffmpeg
     try:
@@ -83,7 +85,7 @@ def take_screenshot():
         os.unlink(tmp.name)
         return data
     except Exception as e:
-        print(f"ffmpeg Fehler: {e}")
+        logger.warning("ffmpeg fehlgeschlagen: %s", e)
     return None
 
 def save_screenshot(data):
@@ -92,7 +94,7 @@ def save_screenshot(data):
     path = os.path.join(SCREENSHOT_DIR, f"chart_gemini_{ts}.png")
     with open(path, "wb") as f:
         f.write(data)
-    print(f"📸 Screenshot: {path}")
+    logger.info("Screenshot gespeichert: %s", path)
     return path
 
 # ---------------------------------------------------------------------------
@@ -122,17 +124,15 @@ def analyze(image_data, prompt):
         from google import genai
         from google.genai import types
     except ImportError:
-        print("google-genai nicht installiert. pip install google-genai")
+        logger.error("google-genai nicht installiert. pip install google-genai")
         sys.exit(1)
     
     key = get_api_key()
     if not key:
-        print("KEIN GEMINI_API_KEY.")
-        print("Hol dir einen kostenlosen Key: https://aistudio.google.com/apikey")
-        print("Dann: echo 'GEMINI_API_KEY=dein_key' >> ~/.hermes/.env")
+        logger.error("KEIN GEMINI_API_KEY. Key holen: https://aistudio.google.com/apikey")
         sys.exit(1)
     
-    print(f"Analysiere mit {GEMINI_MODEL}...")
+    logger.info("Analysiere mit %s...", GEMINI_MODEL)
     try:
         client = genai.Client(api_key=key)
         response = client.models.generate_content(
@@ -141,6 +141,7 @@ def analyze(image_data, prompt):
         )
         return response.text
     except Exception as e:
+        logger.error("Gemini API Fehler: %s", e)
         return f"FEHLER: {e}"
 
 # ---------------------------------------------------------------------------
@@ -151,11 +152,11 @@ def main():
         path = sys.argv[idx + 1]
         with open(path, "rb") as f:
             data = f.read()
-        print(f"Bild: {path}")
+        logger.info("Bild geladen: %s", path)
     else:
         data = take_screenshot()
         if not data:
-            print("Kein Screenshot möglich")
+            logger.error("Kein Screenshot möglich")
             sys.exit(1)
         save_screenshot(data)
     
