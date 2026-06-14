@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Test Qwen3.5:0.8b Vision mit gezieltem Prompt"""
 import requests, json, base64, sys, time
+from _logging import logger
 
 screenshot = sys.argv[1] if len(sys.argv) > 1 else "vision_screenshots/chart_20260515_235128.png"
 
